@@ -1,0 +1,9 @@
+# Fish runtime state (machine specific)
+config/fish/fish_variables
+config/fish/fish_history
+
+# Editor and OS noise
+.DS_Store
+*.swp
+*~
+*.bak.*
