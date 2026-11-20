@@ -83,5 +83,5 @@ Backups are stored in `~/.dotfiles-backup/`. The installer is safe to run again:
 
 ## References
 
-- [craftzdog/dotfiles](https://github.com/craftzdog/dotfiles) — Reference for tool choices and repository structure.
+- [craftzdog/dotfiles](https://github.com/craftzdog/dotfiles) Reference for tool choices and repository structure.
 
