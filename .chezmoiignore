@@ -1,19 +1,13 @@
-# Files kept in the repo but not applied to $HOME
+# Kept in the repository, not copied to $HOME
 README.md
 install.sh
-scripts/
-LICENSE
 
-# Fish runtime state and generated completions
+# Fish runtime state
 .config/fish/fish_variables
 .config/fish/fish_variables*
 .config/fish/fish_history
 .config/fish/completions/
 
 # Generated / local-only files
-.config/nvim/lazy-lock.json
 .config/lazygit/state.yml
-
-# OS and editor noise
 .DS_Store
-*.bak.*

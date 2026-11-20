@@ -1,49 +1,36 @@
 #!/usr/bin/env bash
 #
-# Dotfiles installer for Debian, Ubuntu, and Kubuntu.
+# Minimal dotfiles installer for Debian, Ubuntu, and Kubuntu.
 #
-#   ./install.sh --check     report dependencies and configuration status
-#   ./install.sh --dry-run   show the full plan, change nothing
-#   ./install.sh --install   install dependencies and apply the dotfiles
+#   ./install.sh             install everything (asks before touching configs)
+#   ./install.sh --dry-run   show what would be installed
+#   ./install.sh --yes       skip the confirmation prompt
 #
-# Options:
-#   -y, --yes   skip the final confirmation prompt (non-interactive use)
-#   -h, --help  show this help
 set -euo pipefail
 
 REPO_URL="${DOTFILES_REPO:-https://github.com/Sopanhaa/.config.git}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_BIN="$HOME/.local/bin"
-FONT_SCRIPT="$SCRIPT_DIR/scripts/install-font.sh"
-FONT_FAMILY="BlexMono Nerd Font"
 BACKUP_ROOT="$HOME/.dotfiles-backup"
+FONT_FAMILY="BlexMono Nerd Font"
 
-MODE=""
 ASSUME_YES=0
+DRY_RUN=0
+APT_UPDATED=0
 LAST_BACKUP=""
-OS_NAME="unknown"
-OS_ID=""
-OS_LIKE=""
-MISSING_PKGS=()
 
 if [[ -t 1 ]]; then
     C_RESET=$'\033[0m'
-    C_BOLD=$'\033[1m'
     C_BLUE=$'\033[34m'
     C_GREEN=$'\033[32m'
     C_YELLOW=$'\033[33m'
     C_RED=$'\033[31m'
 else
-    C_RESET=""
-    C_BOLD=""
-    C_BLUE=""
-    C_GREEN=""
-    C_YELLOW=""
-    C_RED=""
+    C_RESET="" C_BLUE="" C_GREEN="" C_YELLOW="" C_RED=""
 fi
 
 say() { printf '%s\n' "$*"; }
-step() { printf '\n%s==>%s %s%s%s\n' "$C_BLUE" "$C_RESET" "$C_BOLD" "$*" "$C_RESET"; }
+step() { printf '\n%s==>%s %s\n' "$C_BLUE" "$C_RESET" "$*"; }
 ok() { printf '%s  ok%s  %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn() { printf '%s  !%s   %s\n' "$C_YELLOW" "$C_RESET" "$*"; }
 die() {
@@ -51,85 +38,47 @@ die() {
     exit 1
 }
 
-trap 'rc=$?; if (( rc != 0 )); then printf "\nerror: command failed (exit %d): %s\n" "$rc" "$BASH_COMMAND" >&2; fi' ERR
+trap 'rc=$?; (( rc == 0 )) || printf "\nerror: command failed (exit %d): %s\n" "$rc" "$BASH_COMMAND" >&2' ERR
 
 usage() {
     cat <<'EOF'
-Dotfiles installer for Debian, Ubuntu, and Kubuntu.
+Minimal dotfiles installer for Debian, Ubuntu, and Kubuntu.
 
 Usage:
-  ./install.sh --check     check dependencies (read-only)
-  ./install.sh --dry-run   show what would be done (read-only)
-  ./install.sh --install   install dependencies and apply dotfiles
-
-Options:
-  -y, --yes    skip the final confirmation prompt
-  -h, --help   show this help
-
-The installer never changes your login shell. Backups are written to
-~/.dotfiles-backup/<timestamp>/ before existing files are replaced.
+  ./install.sh             install tools and apply dotfiles
+  ./install.sh --dry-run   show what would be done
+  ./install.sh --yes       skip the confirmation prompt
+  ./install.sh --help      show this help
 EOF
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-add_local_bin_to_path() {
+add_local_bin() {
     case ":$PATH:" in
         *":$LOCAL_BIN:"*) ;;
         *) export PATH="$LOCAL_BIN:$PATH" ;;
     esac
 }
 
-load_os() {
-    if [[ -r /etc/os-release ]]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        OS_NAME="${PRETTY_NAME:-${NAME:-Linux}}"
-        OS_ID="${ID:-}"
-        OS_LIKE="${ID_LIKE:-}"
-    fi
-}
-
-is_debian_like() {
-    case " ${OS_ID} ${OS_LIKE} " in
-        *" debian "* | *" ubuntu "*) return 0 ;;
-        *) return 1 ;;
+detect_os() {
+    [[ -r /etc/os-release ]] || die "Cannot detect the operating system."
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    OS_NAME="${PRETTY_NAME:-Linux}"
+    case " ${ID:-} ${ID_LIKE:-} " in
+        *" debian "* | *" ubuntu "*) ;;
+        *) die "Unsupported system: $OS_NAME. Use Debian, Ubuntu, or Kubuntu." ;;
     esac
+    have apt-get || die "apt-get is required."
 }
 
-require_debian_like() {
-    load_os
-    is_debian_like ||
-        die "Unsupported system: $OS_NAME. This installer supports Debian, Ubuntu, and Kubuntu only."
-    have apt-get || die "apt-get is required but was not found on this system."
-}
-
-package_for() {
-    case "$1" in
-        curl) echo curl ;;
-        git) echo git ;;
-        fish) echo fish ;;
-        unzip) echo unzip ;;
-        fc-cache | fc-list) echo fontconfig ;;
-        *) echo "" ;;
+detect_arch() {
+    case "$(uname -m)" in
+        x86_64) EZA_ARCH="x86_64" GHQ_ARCH="amd64" LAZYGIT_ARCH="x86_64" ;;
+        aarch64 | arm64) EZA_ARCH="aarch64" GHQ_ARCH="arm64" LAZYGIT_ARCH="arm64" ;;
+        *) die "Unsupported CPU architecture: $(uname -m)" ;;
     esac
-}
-
-collect_missing_packages() {
-    MISSING_PKGS=()
-    local cmd pkg
-    for cmd in curl git fish unzip fc-cache fc-list; do
-        have "$cmd" && continue
-        pkg="$(package_for "$cmd")"
-        [[ -n "$pkg" ]] || continue
-        [[ " ${MISSING_PKGS[*]:-} " == *" $pkg "* ]] && continue
-        MISSING_PKGS+=("$pkg")
-    done
-
-    # HTTPS downloads (chezmoi, Fisher, the font) need CA certificates.
-    if [[ ! -e /etc/ssl/certs/ca-certificates.crt ]]; then
-        MISSING_PKGS+=("ca-certificates")
-    fi
 }
 
 run_privileged() {
@@ -138,110 +87,187 @@ run_privileged() {
     elif have sudo; then
         sudo "$@"
     else
-        die "Root access is required for: $* (sudo is not installed)."
+        die "Root access is required for: $*"
     fi
 }
 
-install_packages() {
-    (($# > 0)) || return 0
-    step "Installing missing packages with apt-get: $*"
+apt_update() {
+    (( APT_UPDATED )) && return 0
     run_privileged apt-get update -qq ||
         die "apt-get update failed. Check your network connection and apt sources."
-    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" ||
-        die "Package installation failed."
-    ok "Packages installed."
+    APT_UPDATED=1
 }
 
-chezmoi_version() {
-    chezmoi --version 2>/dev/null | head -n1 | awk '{print $3}' | tr -d ','
+apt_install() {
+    (($# > 0)) || return 0
+    apt_update
+    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" ||
+        die "Package installation failed: $*"
+}
+
+apt_has() { apt-cache show "$1" >/dev/null 2>&1; }
+
+download() {
+    curl -fsSL --retry 2 "$1" -o "$2" || die "Download failed: $1"
+}
+
+install_archive_binary() {
+    local url="$1" name="$2" type="$3"
+    local tmp archive binary
+
+    tmp="$(mktemp -d)"
+    archive="$tmp/archive"
+
+    step "Installing $name into $LOCAL_BIN"
+    download "$url" "$archive"
+    case "$type" in
+        zip) unzip -qo "$archive" -d "$tmp" || die "Could not extract $name." ;;
+        tar) tar -xzf "$archive" -C "$tmp" || die "Could not extract $name." ;;
+        *) die "Unknown archive type: $type" ;;
+    esac
+
+    binary="$(find "$tmp" -type f -name "$name" -print -quit)"
+    [[ -n "$binary" ]] || die "Could not find the $name binary in the archive."
+    mkdir -p "$LOCAL_BIN"
+    install -m 0755 "$binary" "$LOCAL_BIN/$name"
+    rm -rf "$tmp"
+    hash -r
+    ok "$name installed."
+}
+
+install_base_packages() {
+    local packages=() cmd pkg
+    for cmd in curl git unzip fc-cache fc-list; do
+        have "$cmd" && continue
+        case "$cmd" in
+            curl | git | unzip) pkg="$cmd" ;;
+            *) pkg="fontconfig" ;;
+        esac
+        [[ " ${packages[*]:-} " == *" $pkg "* ]] || packages+=("$pkg")
+    done
+    [[ -e /etc/ssl/certs/ca-certificates.crt ]] || packages+=("ca-certificates")
+
+    if ((${#packages[@]} > 0)); then
+        step "Installing base packages: ${packages[*]}"
+        apt_install "${packages[@]}"
+        ok "Base packages installed."
+    else
+        ok "Base packages are already installed."
+    fi
+}
+
+install_cli_tools() {
+    local cmd pkg
+    local packages=()
+
+    for cmd in fish tmux nvim fzf zoxide; do
+        have "$cmd" && continue
+        case "$cmd" in
+            nvim) pkg="neovim" ;;
+            *) pkg="$cmd" ;;
+        esac
+        apt_update
+        apt_has "$pkg" || die "Package '$pkg' is not available in the configured apt sources."
+        packages+=("$pkg")
+    done
+
+    for cmd in ghq eza lazygit ghostty; do
+        have "$cmd" && continue
+        apt_update
+        apt_has "$cmd" && packages+=("$cmd")
+    done
+
+    if ((${#packages[@]} > 0)); then
+        step "Installing tools from apt: ${packages[*]}"
+        apt_install "${packages[@]}"
+        ok "APT tools installed."
+    fi
+
+    # Fallbacks for packages missing from Debian/Ubuntu repositories.
+    if ! have ghq; then
+        install_archive_binary \
+            "https://github.com/x-motemen/ghq/releases/latest/download/ghq_linux_${GHQ_ARCH}.zip" \
+            ghq zip
+    fi
+
+    if ! have eza; then
+        install_archive_binary \
+            "https://github.com/eza-community/eza/releases/latest/download/eza_${EZA_ARCH}-unknown-linux-gnu.tar.gz" \
+            eza tar
+    fi
+
+    if ! have lazygit; then
+        local tag
+        tag="$(curl -fsSIL -o /dev/null -w '%{url_effective}' \
+            https://github.com/jesseduffield/lazygit/releases/latest |
+            sed 's|.*/tag/v||')"
+        [[ -n "$tag" ]] || die "Could not determine the latest LazyGit version."
+        install_archive_binary \
+            "https://github.com/jesseduffield/lazygit/releases/download/v${tag}/lazygit_${tag}_Linux_${LAZYGIT_ARCH}.tar.gz" \
+            lazygit tar
+    fi
+
+    if ! have ghostty; then
+        warn "Ghostty is not available in apt. Install it from https://ghostty.org/download"
+    fi
 }
 
 install_chezmoi() {
-    add_local_bin_to_path
-
+    add_local_bin
     if have chezmoi; then
-        ok "chezmoi $(chezmoi_version) is already installed."
+        ok "chezmoi is already installed."
         return 0
     fi
 
-    have curl || die "curl is required to install chezmoi."
-    step "Installing chezmoi into $LOCAL_BIN"
-    mkdir -p "$LOCAL_BIN"
-
     local installer
+    step "Installing chezmoi into $LOCAL_BIN"
     installer="$(mktemp)"
-    if ! curl -fsSL https://get.chezmoi.io -o "$installer"; then
+    download "https://get.chezmoi.io" "$installer"
+    sh "$installer" -b "$LOCAL_BIN" || {
         rm -f "$installer"
-        die "Could not download the chezmoi installer. Check your network connection."
-    fi
-    if ! sh "$installer" -b "$LOCAL_BIN"; then
-        rm -f "$installer"
-        die "The chezmoi installer failed."
-    fi
+        die "chezmoi installation failed."
+    }
     rm -f "$installer"
     hash -r
-
-    have chezmoi ||
-        die "chezmoi was installed but is not on PATH. Add $LOCAL_BIN to PATH and re-run."
-    ok "Installed chezmoi $(chezmoi_version)."
+    have chezmoi || die "chezmoi installation failed."
+    ok "chezmoi installed."
 }
 
 ensure_bash_path() {
     local rc="$HOME/.bashrc"
-
-    if [[ -f "$rc" ]] && grep -q 'dotfiles installer: user-local binaries' "$rc"; then
-        ok "$HOME/.bashrc already adds $HOME/.local/bin to PATH."
+    [[ -f "$rc" ]] && grep -q 'dotfiles installer' "$rc" && return 0
+    [[ -e "$rc" && ! -w "$rc" ]] && {
+        warn "Add $LOCAL_BIN to PATH manually (cannot write $rc)."
         return 0
-    fi
-    if [[ -f "$rc" ]] && grep -q '\.local/bin' "$rc"; then
-        ok "$HOME/.bashrc already references $HOME/.local/bin."
-        return 0
-    fi
-    if [[ -e "$rc" && ! -w "$rc" ]]; then
-        warn "Cannot write $rc. Add $LOCAL_BIN to PATH manually."
-        return 0
-    fi
+    }
 
     cat >>"$rc" <<'EOF'
 
-# Added by dotfiles installer: user-local binaries
+# Added by dotfiles installer
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) export PATH="$HOME/.local/bin:$PATH" ;;
 esac
 EOF
-    ok "Added $HOME/.local/bin to $HOME/.bashrc (open a new terminal to use it)."
+    ok "Added $LOCAL_BIN to ~/.bashrc."
 }
 
 init_chezmoi() {
-    step "Initializing chezmoi from $REPO_URL"
-    chezmoi init "$REPO_URL" ||
-        die "chezmoi init failed. Check your network connection and repository URL."
-    ok "chezmoi source: $(chezmoi source-path)"
-}
-
-managed_files() {
-    chezmoi managed --include files
-}
-
-pending_files() {
-    chezmoi status --include files | awk 'NF >= 2 { print $2 }'
+    step "Loading dotfiles with chezmoi"
+    chezmoi init "$REPO_URL" || die "chezmoi init failed."
 }
 
 show_plan() {
-    step "Files that chezmoi will manage in $HOME"
     local rel existing=0
+    step "Files to manage in $HOME"
     while IFS= read -r rel; do
         [[ -n "$rel" ]] || continue
         printf '  %s\n' "$rel"
-        if [[ -e "$HOME/$rel" || -L "$HOME/$rel" ]]; then
-            existing=$((existing + 1))
-        fi
-    done < <(managed_files)
+        [[ -e "$HOME/$rel" || -L "$HOME/$rel" ]] && existing=$((existing + 1))
+    done < <(chezmoi managed --include files)
 
     if (( existing > 0 )); then
-        say ""
-        warn "$existing existing file(s) will be backed up before being replaced."
+        warn "$existing existing file(s) will be backed up and replaced."
     fi
 }
 
@@ -253,8 +279,8 @@ confirm() {
     [[ "$reply" =~ ^[Yy]$ ]]
 }
 
-backup_pending_files() {
-    local stamp rel target dest count=0
+backup_files() {
+    local stamp rel target count=0
     stamp="$(date +%Y%m%d-%H%M%S)"
     LAST_BACKUP="$BACKUP_ROOT/$stamp"
 
@@ -262,12 +288,10 @@ backup_pending_files() {
         [[ -n "$rel" ]] || continue
         target="$HOME/$rel"
         [[ -e "$target" || -L "$target" ]] || continue
-
-        dest="$LAST_BACKUP/$rel"
-        mkdir -p "$(dirname -- "$dest")"
-        cp -a -- "$target" "$dest"
+        mkdir -p "$(dirname -- "$LAST_BACKUP/$rel")"
+        cp -a -- "$target" "$LAST_BACKUP/$rel"
         count=$((count + 1))
-    done < <(pending_files)
+    done < <(chezmoi status --include files | awk 'NF >= 2 { print $2 }')
 
     if (( count == 0 )); then
         LAST_BACKUP=""
@@ -278,8 +302,6 @@ backup_pending_files() {
 }
 
 setup_fish() {
-    have fish || die "fish is required but is not installed."
-
     if fish -c 'type -q fisher' >/dev/null 2>&1; then
         ok "Fisher is already installed."
     else
@@ -289,26 +311,17 @@ setup_fish() {
         ok "Fisher installed."
     fi
 
-    step "Installing Fish plugins from fish_plugins (Tide)"
+    step "Installing Fish plugins (Tide)"
     fish -c 'fisher update' || die "fisher update failed."
-    ok "Fish plugins are up to date."
+    ok "Fish plugins installed."
 }
 
 configure_tide() {
-    if ! fish -c 'type -q tide' >/dev/null 2>&1; then
-        warn "Tide was not installed; skipping prompt configuration."
-        return 0
-    fi
-    if [[ ! -t 0 ]]; then
-        say "Skipping 'tide configure' (no interactive terminal)."
-        say "Run it later with: fish -c 'tide configure'"
-        return 0
-    fi
-
-    if confirm "Tide is installed. Configure the prompt now?"; then
-        fish -c 'tide configure' || warn "tide configure did not finish. Run it later with: fish -c 'tide configure'"
-    else
-        say "Skipped. Run later with: fish -c 'tide configure'"
+    fish -c 'type -q tide' >/dev/null 2>&1 || return 0
+    (( ASSUME_YES )) && return 0
+    [[ -t 0 ]] || return 0
+    if confirm "Configure the Tide prompt now?"; then
+        fish -c 'tide configure' || warn "Tide configuration skipped."
     fi
 }
 
@@ -316,215 +329,133 @@ font_installed() {
     have fc-list || return 1
     local families
     families="$(fc-list : family 2>/dev/null)" || return 1
-    grep -Fqi "BlexMono Nerd Font" <<<"$families"
+    grep -Fqi "$FONT_FAMILY" <<<"$families"
 }
 
 install_font() {
-    [[ -x "$FONT_SCRIPT" ]] || die "Font installer not found or not executable: $FONT_SCRIPT"
+    if font_installed; then
+        ok "$FONT_FAMILY is already installed."
+        return 0
+    fi
+
+    local tmp archive dest
+    tmp="$(mktemp -d)"
+    archive="$tmp/font.zip"
+    dest="${XDG_DATA_HOME:-$HOME/.local/share}/fonts/BlexMono"
+
     step "Installing $FONT_FAMILY"
-    "$FONT_SCRIPT" || die "Font installation failed."
+    download "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/IBMPlexMono.zip" "$archive"
+    mkdir -p "$dest"
+    unzip -qo "$archive" -d "$dest" || die "Could not extract the font archive."
+    fc-cache -f "$dest" >/dev/null 2>&1 || true
+    rm -rf "$tmp"
+
+    font_installed || die "The font was installed to $dest but fc-list cannot detect it."
+    ok "$FONT_FAMILY installed."
 }
 
-final_summary() {
-    step "Installation complete"
-    say "Dotfiles are managed by chezmoi."
-    if [[ -n "$LAST_BACKUP" ]]; then
-        say "Backups: $LAST_BACKUP"
+verify_tools() {
+    local cmd
+    step "Verification"
+    for cmd in fish tmux nvim lazygit zoxide eza ghq fzf chezmoi; do
+        have "$cmd" || die "$cmd is required but was not found."
+    done
+
+    say "  fish:    $(fish --version)"
+    say "  tmux:    $(tmux -V)"
+    say "  nvim:    $(nvim --version | head -n1)"
+    say "  lazygit: $(lazygit --version | head -n1)"
+    say "  zoxide:  $(zoxide --version)"
+    say "  eza:     $(eza --version | head -n1)"
+    say "  ghq:     $(ghq --version 2>/dev/null || echo installed)"
+    say "  fzf:     $(fzf --version)"
+    say "  chezmoi: $(chezmoi --version | head -n1)"
+
+    if have ghostty; then
+        ok "Ghostty is installed."
+    else
+        warn "Ghostty is not installed; get it from https://ghostty.org/download"
     fi
-    say "Your login shell was NOT changed. Start Fish with: fish"
-    say "To make Fish your default later: chsh -s \"$(command -v fish)\""
-    say "Open a new terminal so PATH changes take effect."
-    say "Useful commands: chezmoi diff, chezmoi apply, chezmoi edit <file>"
+
+    if font_installed; then
+        ok "$FONT_FAMILY is detected."
+    else
+        warn "$FONT_FAMILY is not detected."
+    fi
+
+    if fish -c 'type -q fisher; and type -q tide' >/dev/null 2>&1; then
+        ok "Fisher and Tide are available."
+    else
+        warn "Fisher or Tide is missing."
+    fi
+}
+
+run_dry_run() {
+    local cmd
+    detect_os
+    step "Dry run - nothing will be changed"
+    say "System: $OS_NAME"
+
+    for cmd in curl git unzip fc-cache fc-list fish tmux nvim fzf zoxide ghq eza lazygit chezmoi; do
+        have "$cmd" && continue
+        say "  would install: $cmd"
+    done
+    have ghostty || say "  would install: ghostty (only if available in apt)"
+    font_installed || say "  would install: $FONT_FAMILY"
+
+    say ""
+    say "Would apply these files to $HOME after confirmation:"
+    while IFS= read -r -d '' file; do
+        printf '  .config/%s\n' "${file#"$SCRIPT_DIR"/dot_config/}"
+    done < <(find "$SCRIPT_DIR/dot_config" -type f -print0 | sort -z)
+
+    say ""
+    say "Dry run complete."
 }
 
 run_install() {
+    detect_os
+    detect_arch
+    add_local_bin
+
     if [[ ! -t 0 ]] && (( ! ASSUME_YES )); then
-        die "No interactive terminal. Re-run with --yes or from a terminal."
+        die "No interactive terminal. Re-run with --yes."
     fi
 
-    require_debian_like
-    add_local_bin_to_path
-
-    # First-run chezmoi init prompts for name/email, which needs a TTY.
-    if [[ ! -t 0 ]]; then
-        local chezmoi_config="${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi/chezmoi.toml"
-        if [[ ! -f "$chezmoi_config" ]]; then
-            die "First-time setup needs an interactive terminal for chezmoi's name/email prompt. Run without --yes."
-        fi
-    fi
-
-    collect_missing_packages
-    if ((${#MISSING_PKGS[@]} > 0)); then
-        install_packages "${MISSING_PKGS[@]}"
-    else
-        ok "All required system packages are already installed."
-    fi
-    hash -r
-
+    install_base_packages
+    install_cli_tools
     install_chezmoi
+
     init_chezmoi
     show_plan
 
     step "Ready to apply"
-    say "chezmoi will write the files listed above into $HOME."
-    say "Existing versions are backed up to $BACKUP_ROOT/<timestamp>."
-    say "$HOME/.local/bin is added to $HOME/.bashrc if it is missing."
-    confirm "Apply these changes?" || die "Installation cancelled. Nothing was changed."
+    say "Existing files are backed up to $BACKUP_ROOT/<timestamp>."
+    say "$LOCAL_BIN is added to ~/.bashrc if missing."
+    confirm "Apply these changes?" || die "Cancelled. Nothing was changed."
 
     ensure_bash_path
-    backup_pending_files
+    backup_files
 
-    step "Applying dotfiles with chezmoi"
-    chezmoi apply --force || die "chezmoi apply failed. Backups are in ${LAST_BACKUP:-$BACKUP_ROOT}."
+    step "Applying dotfiles"
+    chezmoi apply --force || die "chezmoi apply failed."
     ok "Dotfiles applied."
 
     setup_fish
     configure_tide
     install_font
-    final_summary
-}
+    verify_tools
 
-run_check() {
-    load_os
-    local failed=0
-
-    step "System"
-    say "OS: $OS_NAME"
-    if is_debian_like; then
-        ok "Debian-based system"
-    else
-        warn "Not a Debian-based system; apt steps will not work."
-        failed=1
-    fi
-    if have apt-get; then
-        ok "apt-get is available"
-    else
-        warn "apt-get is missing"
-        failed=1
-    fi
-
-    step "Required commands"
-    local cmd
-    for cmd in curl git fish unzip fc-cache fc-list; do
-        if have "$cmd"; then
-            ok "$cmd -> $(command -v "$cmd")"
-        else
-            warn "$cmd is missing (package: $(package_for "$cmd"))"
-            failed=1
-        fi
-    done
-    if [[ -e /etc/ssl/certs/ca-certificates.crt ]]; then
-        ok "CA certificates are present"
-    else
-        warn "ca-certificates is missing (package: ca-certificates)"
-        failed=1
-    fi
-
-    step "chezmoi"
-    if have chezmoi; then
-        ok "$(chezmoi --version 2>/dev/null | head -n1)"
-    else
-        warn "chezmoi is missing; --install will put it in $LOCAL_BIN"
-        failed=1
-    fi
-
-    step "Fish add-ons"
-    if have fish; then
-        if fish -c 'type -q fisher' >/dev/null 2>&1; then
-            ok "Fisher is installed"
-        else
-            warn "Fisher is missing; --install will add it"
-        fi
-        if fish -c 'type -q tide' >/dev/null 2>&1; then
-            ok "Tide is installed"
-        else
-            warn "Tide is missing; --install will add it"
-        fi
-    else
-        warn "fish is missing; cannot check Fisher or Tide"
-    fi
-
-    step "Font"
-    if font_installed; then
-        ok "$FONT_FAMILY is detected"
-    else
-        warn "$FONT_FAMILY is not detected; --install will add it"
-    fi
-
-    step "Configuration"
-    if have chezmoi; then
-        local src
-        src="$(chezmoi source-path 2>/dev/null || true)"
-        if [[ -n "$src" && -d "$src" ]]; then
-            ok "chezmoi source: $src"
-            local pending
-            pending="$(chezmoi status 2>/dev/null | wc -l | tr -d ' ')"
-            say "  Pending changes: $pending"
-        else
-            warn "chezmoi source is not initialized yet"
-        fi
-    else
-        warn "chezmoi is not available yet"
-    fi
-
-    say ""
-    if (( failed )); then
-        warn "Some required dependencies are missing. Run: ./install.sh --install"
-        exit 1
-    fi
-    ok "All required dependencies are present."
-}
-
-list_targets() {
-    local file rel
-    while IFS= read -r -d '' file; do
-        rel="${file#"$SCRIPT_DIR"/dot_config/}"
-        printf '.config/%s\n' "$rel"
-    done < <(find "$SCRIPT_DIR/dot_config" -type f -print0 | sort -z)
-}
-
-run_dry_run() {
-    load_os
-    step "Dry run - nothing will be changed"
-    say "OS: $OS_NAME"
-    if ! is_debian_like; then
-        warn "Not a Debian-based system; the apt steps would not work."
-    fi
-
-    collect_missing_packages
-    if ((${#MISSING_PKGS[@]} > 0)); then
-        say "Would install system packages with apt-get: ${MISSING_PKGS[*]}"
-    else
-        ok "All required system packages are already installed."
-    fi
-
-    if have chezmoi; then
-        ok "chezmoi is already installed."
-    else
-        say "Would install chezmoi into $LOCAL_BIN."
-    fi
-
-    say "Would run: chezmoi init $REPO_URL"
-    say "Would back up any existing target files to $BACKUP_ROOT/<timestamp>."
-    say "Would apply these files to $HOME:"
-    list_targets | sed 's/^/  /'
-    say "Would install Fisher and Fish plugins (Tide) using fish."
-    say "Would offer to run: fish -c 'tide configure'"
-    if font_installed; then
-        ok "$FONT_FAMILY is already available."
-    else
-        say "Would install $FONT_FAMILY."
-    fi
-
-    say ""
-    say "Dry run complete. No changes were made."
+    step "Done"
+    [[ -n "$LAST_BACKUP" ]] && say "Backups: $LAST_BACKUP"
+    say "Your login shell was not changed. Start Fish with: fish"
+    say "Make Fish your default later with: chsh -s \"$(command -v fish)\""
+    say "Open a new terminal to load the new PATH."
 }
 
 while (($# > 0)); do
     case "$1" in
-        --check) MODE="check" ;;
-        --dry-run) MODE="dry-run" ;;
-        --install) MODE="install" ;;
+        --dry-run) DRY_RUN=1 ;;
         -y | --yes) ASSUME_YES=1 ;;
         -h | --help)
             usage
@@ -538,17 +469,8 @@ while (($# > 0)); do
     shift
 done
 
-if [[ -z "$MODE" ]]; then
-    usage
-    exit 1
+if (( DRY_RUN )); then
+    run_dry_run
+else
+    run_install
 fi
-
-if (( EUID == 0 )) && [[ -n "${SUDO_USER:-}" ]]; then
-    die "Do not run this script with sudo. Run it as your normal user; it asks for sudo only when needed."
-fi
-
-case "$MODE" in
-    check) run_check ;;
-    dry-run) run_dry_run ;;
-    install) run_install ;;
-esac
