@@ -1,37 +1,17 @@
 #!/usr/bin/env bash
-# Link this repository's config/ directory into ~/.config.
-# Existing entries are backed up as <name>.bak.<timestamp>.
+# Bootstrap chezmoi and apply this dotfiles repository.
 set -euo pipefail
 
-DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE="$DOTFILES/config"
-TARGET="${XDG_CONFIG_HOME:-$HOME/.config}"
-STAMP="$(date +%Y%m%d-%H%M%S)"
+REPO="${DOTFILES_REPO:-https://github.com/Sopanhaa/.config.git}"
 
-if [[ ! -d "$SOURCE" ]]; then
-    echo "error: $SOURCE not found" >&2
-    exit 1
+if ! command -v chezmoi >/dev/null 2>&1; then
+    echo "Installing chezmoi into $HOME/.local/bin ..."
+    sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+    export PATH="$HOME/.local/bin:$PATH"
 fi
 
-mkdir -p "$TARGET"
-
-for src in "$SOURCE"/*; do
-    name="$(basename "$src")"
-    dest="$TARGET/$name"
-
-    if [[ -L "$dest" && "$(readlink -f "$dest")" == "$(readlink -f "$src")" ]]; then
-        printf 'ok      %s\n' "$dest"
-        continue
-    fi
-
-    if [[ -e "$dest" || -L "$dest" ]]; then
-        mv "$dest" "$dest.bak.$STAMP"
-        printf 'backup  %s -> %s\n' "$dest" "$dest.bak.$STAMP"
-    fi
-
-    ln -s "$src" "$dest"
-    printf 'link    %s -> %s\n' "$dest" "$src"
-done
+# Pull the latest source changes and apply them to $HOME
+chezmoi init --apply "$REPO"
 
 cat <<'EOF'
 

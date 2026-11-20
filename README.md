@@ -25,18 +25,29 @@
 
 ## Installation
 
+Managed with [chezmoi](https://www.chezmoi.io/). Chezmoi treats this repository as its source and writes the real files into `$HOME` — no symlinks involved.
+
+```bash
+# One-liner: install chezmoi, clone this repo, and apply the configs
+sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply Sopanhaa
+```
+
+Or clone first and use the bootstrap script:
+
 ```bash
 git clone https://github.com/Sopanhaa/.config.git ~/dotfiles
 cd ~/dotfiles
-
-./install.sh              # symlink config/* into ~/.config (backs up existing files)
-./scripts/install-font.sh # install BlexMono Nerd Font
+./install.sh
 ```
+
+Before the first apply on a machine that already has configs, preview what will change with `chezmoi diff`.
 
 Then, in a new terminal:
 
 ```bash
-# Install Fisher, then the plugins listed in config/fish/fish_plugins
+./scripts/install-font.sh # install BlexMono Nerd Font
+
+# Install Fisher, then the plugins listed in dot_config/fish/fish_plugins
 curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source
 fisher install jorgebucaran/fisher
 fisher update
@@ -46,6 +57,17 @@ tide configure
 ```
 
 The first Neovim start bootstraps [lazy.nvim](https://github.com/folke/lazy.nvim) and installs all plugins automatically.
+
+### Daily use
+
+| Command | Purpose |
+|---|---|
+| `chezmoi edit ~/.config/fish/config.fish` | Edit a managed file |
+| `chezmoi diff` | Preview pending changes |
+| `chezmoi apply` | Write changes to `$HOME` |
+| `chezmoi add ~/.config/foo` | Start managing an existing file |
+| `chezmoi cd` | Open the source repository |
+| `chezmoi update` | Pull the latest changes and apply |
 
 ### Packages
 
@@ -57,17 +79,20 @@ sudo apt install fish tmux neovim fzf zoxide eza ghq git
 
 LazyGit and Ghostty should be installed from their official instructions (or your distribution's package manager if available).
 
-### What `install.sh` does
+### How it works
 
-- Symlinks every folder in `config/` to `~/.config/<name>`.
-- Moves any conflicting existing config to `<name>.bak.<timestamp>` instead of deleting it.
-- Is safe to re-run; already-correct links are left untouched.
+- Chezmoi copies files from this repo into `$HOME` and keeps track of what it manages.
+- `dot_config/` maps to `~/.config/`, so `dot_config/tmux/tmux.conf` becomes `~/.config/tmux/tmux.conf`.
+- `.chezmoi.toml.tmpl` prompts for name, email, and GitHub username on first init.
+- `README.md`, `install.sh`, and `scripts/` are excluded via `.chezmoiignore`.
 
 ## Structure
 
 ```text
 .
-├── config/
+├── .chezmoi.toml.tmpl        # Prompts for name/email on first init
+├── .chezmoiignore            # Repo files that are not applied
+├── dot_config/               # → ~/.config
 │   ├── ghostty/config        # Font, theme, window padding
 │   ├── fish/
 │   │   ├── config.fish       # Env, integrations, abbreviations
@@ -81,7 +106,7 @@ LazyGit and Ghostty should be installed from their official instructions (or you
 │   │       └── plugins/      # colorscheme, editor, ui, git specs
 │   └── tmux/tmux.conf        # Prefix, splits, status bar, popups
 ├── scripts/install-font.sh
-├── install.sh
+├── install.sh                # chezmoi bootstrap
 └── README.md
 ```
 
