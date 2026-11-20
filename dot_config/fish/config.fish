@@ -14,7 +14,11 @@ if type -q zoxide
 end
 
 if type -q fzf
-    fzf --fish 2>/dev/null | source
+    if fzf --fish >/dev/null 2>&1
+        fzf --fish | source
+    else if test -r /usr/share/doc/fzf/examples/key-bindings.fish
+        source /usr/share/doc/fzf/examples/key-bindings.fish
+    end
 end
 
 if status is-interactive
