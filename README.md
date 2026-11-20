@@ -111,6 +111,10 @@ Leader is `Space`.
 | `<leader>gg` | Open LazyGit |
 | `Ctrl+h/j/k/l` | Move between windows |
 
+## References
+
+- [craftzdog/dotfiles](https://github.com/craftzdog/dotfiles) — reference for tool choices and repository structure.
+
 ## License
 
 Personal configuration files for learning and everyday development.
