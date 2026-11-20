@@ -208,7 +208,16 @@ install_cli_tools() {
     fi
 
     if ! have ghostty; then
-        warn "Ghostty is not available in apt. Install it from https://ghostty.org/download"
+        if have snap; then
+            step "Installing Ghostty with snap"
+            if run_privileged snap install ghostty --classic; then
+                ok "Ghostty installed."
+            else
+                warn "Ghostty snap install failed. Get it from https://ghostty.org/download"
+            fi
+        else
+            warn "Ghostty is not available in apt or snap. Get it from https://ghostty.org/download"
+        fi
     fi
 }
 

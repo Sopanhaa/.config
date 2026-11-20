@@ -58,7 +58,7 @@ Your login shell is **never** changed. Start Fish with `fish`; make it the defau
 chsh -s "$(command -v fish)"
 ```
 
-Ghostty is installed automatically when it is available in apt. Otherwise install it manually from [ghostty.org/download](https://ghostty.org/download).
+Ghostty is installed from apt or snap when available. Otherwise install it from [ghostty.org/download](https://ghostty.org/download).
 
 ## Usage
 
