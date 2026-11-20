@@ -1,9 +1,3 @@
-# My Linux Dotfiles
-
-My personal Linux terminal setup and configuration files for a clean, modern, and productive development environment.
-
-Built primarily for **Kubuntu and Ubuntu**.
-
 ## Terminal Setup
 
 | Tool | Description |
@@ -32,7 +26,7 @@ Built primarily for **Kubuntu and Ubuntu**.
 ## Installation
 
 ```bash
-git clone <your-repo-url> ~/dotfiles
+git clone https://github.com/Sopanhaa/.config.git ~/dotfiles
 cd ~/dotfiles
 
 ./install.sh              # symlink config/* into ~/.config (backs up existing files)
@@ -69,7 +63,7 @@ LazyGit and Ghostty should be installed from their official instructions (or you
 - Moves any conflicting existing config to `<name>.bak.<timestamp>` instead of deleting it.
 - Is safe to re-run; already-correct links are left untouched.
 
-## Repository Structure
+## Structure
 
 ```text
 .
@@ -116,21 +110,6 @@ Leader is `Space`.
 | `<leader>fb` / `<leader>fr` | Buffers / recent files |
 | `<leader>gg` | Open LazyGit |
 | `Ctrl+h/j/k/l` | Move between windows |
-
-## Configuration
-
-My configurations focus on:
-
-- Clean and minimal terminal appearance
-- Fast and lightweight shell experience
-- Comfortable keyboard shortcuts
-- Git and GitHub integration
-- Simple development workflow
-- Easy configuration backup and restoration
-
-## Reference GitHub Repositories
-
-The configurations are based on official documentation and open-source projects linked above.
 
 ## License
 
