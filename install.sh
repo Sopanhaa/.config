@@ -357,19 +357,24 @@ install_font() {
 verify_tools() {
     local cmd
     step "Verification"
+    local version
     for cmd in fish tmux nvim lazygit zoxide eza ghq fzf chezmoi; do
         have "$cmd" || die "$cmd is required but was not found."
+        case "$cmd" in
+            tmux)
+                version="$(tmux -V)" || die "tmux is not working."
+                ;;
+            ghq)
+                ghq --help >/dev/null 2>&1 || die "ghq is not working."
+                version="$(ghq --version 2>/dev/null || echo installed)"
+                ;;
+            *)
+                version="$("$cmd" --version 2>/dev/null)" || die "$cmd is not working."
+                version="${version%%$'\n'*}"
+                ;;
+        esac
+        say "  $cmd: $version"
     done
-
-    say "  fish:    $(fish --version)"
-    say "  tmux:    $(tmux -V)"
-    say "  nvim:    $(nvim --version | head -n1)"
-    say "  lazygit: $(lazygit --version | head -n1)"
-    say "  zoxide:  $(zoxide --version)"
-    say "  eza:     $(eza --version | head -n1)"
-    say "  ghq:     $(ghq --version 2>/dev/null || echo installed)"
-    say "  fzf:     $(fzf --version)"
-    say "  chezmoi: $(chezmoi --version | head -n1)"
 
     if have ghostty; then
         ok "Ghostty is installed."
