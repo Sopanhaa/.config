@@ -1,7 +1,3 @@
-# Linux Dotfiles
-
-A small, beginner-friendly terminal setup for **Debian, Ubuntu, and Kubuntu**, managed with [chezmoi](https://www.chezmoi.io/).
-
 ## Terminal setup
 
 | Tool | Description |
@@ -13,7 +9,7 @@ A small, beginner-friendly terminal setup for **Debian, Ubuntu, and Kubuntu**, m
 
 ### Fonts
 
-- [BlexMono Nerd Font](https://www.nerdfonts.com/) — Programming font with icons and symbols.
+- [BlexMono Nerd Font](https://www.nerdfonts.com/) Programming font with icons and symbols.
 
 ## Shell setup (Linux)
 
@@ -89,6 +85,3 @@ Backups are stored in `~/.dotfiles-backup/`. The installer is safe to run again:
 
 - [craftzdog/dotfiles](https://github.com/craftzdog/dotfiles) — Reference for tool choices and repository structure.
 
-## License
-
-Personal configuration files for learning and everyday development.
